@@ -1,127 +1,143 @@
-# Documents
+# Entity Linking over Historical Documents: CPC Records to Wikidata
 
-- [Report in Word Format](Entity_Linking_Report.docx)
-- [Report in PDF Format](Entity_Linking_Report.pdf)
-- [CPC Database](data/cpc_records.zip) (in zip format due to GitHub restrictions, it must be decompressed before use)
-- [CPC Database in csv format](data/cpc_csv.zip) 
-# Production
+![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?style=flat&logo=python&logoColor=white)
+![Wikidata](https://img.shields.io/badge/Knowledge%20Base-Wikidata-006699?style=flat&logo=wikidata&logoColor=white)
 
-The [master.csv](data/production/master.csv) file contains the results of the linking between CPC records (*cpc* field, which contains the record ID) and Wikidata entities (*qid* field). It has 152,589 rows (one for each CPC record), and the *qid* field can have the following values:
-- A hyphen (-) if it has not been processed
-- The text NIL if it could not be linked to any entity
-- The QID descriptor if it could be linked to that entity
+An end-to-end entity linking pipeline that maps **152,589 records of the Casellario
+Politico Centrale (CPC)** — a historical Italian police archive — to their corresponding
+entities in **Wikidata**.
 
-The operations that can be performed are:
+## The problem
 
-## Creation and population of master file
+The CPC is a historical registry of individuals compiled by the Italian police between
+1894 and the 1980s. Each record exists only as free natural-language text, which makes the
+collection essentially unusable for search, aggregation or semantic analysis.
 
-The following function calls create the file and populate it with the labeling and test results (they only need to be done once)
+Turning it into structured, queryable data means resolving, for every record, *which*
+entity in a public knowledge base that record refers to. That breaks down into four
+classic sub-problems:
 
-`from src.labellingprocess import *`
+1. **Mention detection** — find the referring expression inside the record text.
+2. **Candidate generation** — retrieve plausible Wikidata entities for that mention.
+3. **Disambiguation** — select the correct candidate.
+4. **Abstention** — decide when *no* candidate is correct.
 
-`create_master_file(FILE_CPC_ALL, FILE_MASTER)`
+The fourth problem matters as much as the others. A linking system that always returns an
+answer is worse than useless on a real historical corpus, full of ambiguous names and
+records that simply have no entity. The pipeline therefore implements an explicit
+**NIL detection** mechanism and reports how often it abstains.
 
-`load_data(FILE_MASTER, 'data/labelling')`
+## Pipeline
 
-`load_data(FILE_MASTER, 'data/labelling')`
+1. **Labelling process** — builds and populates the master file from the CPC source.
+2. **Linking** — mention detection, candidate generation and disambiguation against
+   Wikidata.
+3. **NIL detection** — abstains when no candidate clears the confidence bar.
+4. **Evaluation** — scores linking quality against the held-out annotated sample.
 
-## Processing of registers of CPC
+## Data
 
-This can be done in two ways:
-- By providing a list of the ID fields of the CPC records to be processed.
-- By requesting that the first n records of the master file that have not yet been processed be processed.
+- **Input:** 152,589 CPC records, one row each.
+- **Output:** `data/production/master.csv`, one row per CPC record.
 
-`process_cpcs(['D02945', 'K00623'])`
+The `qid` field carries the linking outcome:
 
-`process_num(100)`
+| Value | Meaning |
+| --- | --- |
+| `-` | Record not yet processed |
+| `NIL` | Processed, but no entity could be confidently linked |
+| `Q…` | Wikidata QID of the linked entity |
 
-In both cases, the information in the [master.csv](data/production/master.csv) file is automatically updated.
+## Results
 
-Detailed information about the linking process can be obtained using the following function:
+Four classification models were evaluated on two datasets — a labelling set and a
+disjoint test set — using accuracy, precision, recall and F1. Precision was prioritised
+over recall, since an incorrect link is more harmful than a missed one, so the decision
+threshold was fixed at 0.85.
 
-`info_cpc('Z00225')`
+| Model / set | Accuracy | Precision | Recall | F1 |
+| --- | --- | --- | --- | --- |
+| Heuristic — labelling | 96.2% | 100.0% | 93.6% | 0.967 |
+| Heuristic — test | 97.3% | 100.0% | 96.4% | 0.981 |
+| Logistic Regression — labelling | 93.2% | 92.6% | 96.2% | 0.943 |
+| Logistic Regression — test | 96.0% | 100.0% | 94.5% | 0.972 |
+| Random Forest — labelling | 96.2% | 100.0% | 93.6% | 0.967 |
+| Random Forest — test | 97.3% | 100.0% | 96.4% | 0.981 |
+| Gradient Boosting — labelling | 99.2% | 100.0% | 98.7% | 0.994 |
+| Gradient Boosting — test | **100.0%** | **100.0%** | **100.0%** | **1.000** |
 
-                    CPC             Wikidata      Rank
-    Id           Z00225            Q12797219
-    Name     Nada Zagar           Nada Žagar         1
-    Birth          1924                 1924         1
-    Sex               f                    f         1
-    Country  Yugoslavia  Regno di Jugoslavia         1
-    City        Dobrova      Srednja Dobrava  0.857143
-    Occup     casalinga           partigiano        -1
-    Father    Stanislao                              0
-    Affil     comunista                              0
-    Alias
-    Linked       LINKED
+**Gradient Boosting is the best model**, misclassifying a single case on the labelling set
+and classifying every test case correctly (F1 = 1.000). Logistic Regression is the
+weakest of the four. Notably, the Random Forest reproduces the heuristic's results exactly
+— the same cases are misclassified — indicating that its decision trees largely replicate
+the rule the heuristic encodes.
 
-# Labelling Process
+### Datasets
 
-`from src.labellingprocess import *`
+The labelling set and the test set were built by the same pipeline over different records:
 
-## Initial Step: Obtain the CPC (Casellario Politico Centrale) database
+- **Labelling set:** after candidate retrieval and enrichment, 5,465 pairs remained;
+  removing non-person entries left 4,857, and removing pairs with a birth-year gap above
+  one year left 132 pairs (122 persons) — 78 positive (59.1%) and 54 negative (40.9%).
+- **Test set:** 3,061 randomly chosen persons. 2,330 returned no candidate, and after
+  filtering 75 pairs (74 distinct persons) remained — 55 positive (73.3%) and 20 negative
+  (26.7%).
 
-`download_cpc(FILE_CPC_ALL, PROGRESS_CPC)`
+### Models compared
 
-## Analysis of the information contained in CPC
+- **Heuristic** — predicts a link when `eval_occupation = 1` or `eval_city > threshold`, a
+  rule derived from the two most discriminative features.
+- **Logistic Regression** — scikit-learn; largest positive coefficients are `eval_city`
+  (+2.04), `eval_country` (+1.37) and `eval_occupation` (+1.33).
+- **Random Forest** — 300 trees, max depth 3, class-imbalance weighting. Feature
+  importance dominated by `eval_city` (0.43), `eval_birth` (0.22), `eval_occupation` (0.16).
+- **Gradient Boosting** — 100 estimators, depth 3, imbalance weighting. Feature importance
+  concentrated on `eval_city` (0.80) and `eval_occupation` (0.15).
 
-`cpc_analysis(FILE_CPC_ALL)`
+## Repository structure
+```
+src/                                 # labelling process, linking pipeline, evaluation
+data/                                # CPC source data, annotated sets, production output
+Entity_Linking_Report.pdf / .docx    # full report
+```
 
-## Step 1-a: Creating a subset for labeling
 
-`add_subset(FILE_CPC_ALL, FILE_CPC_EXTRACT, 0.02)`
+## Usage
 
-## Step 1-b: Direct search on WikiData
+### Setup - create and populate the master file (run once)
 
-`step1b(FILE_CPC_EXTRACT, FILE_STEP1)`
+```python
+from src.labellingprocess import *
 
-## Step 2-a: Complete records with SPARQL-WikiData
+create_master_file(FILE_CPC_ALL, FILE_MASTER)
+load_data(FILE_MASTER, 'data/labelling')
+```
 
-`step2a(FILE_CPC_EXTRACT, FILE_STEP1, FILE_STEP2a)`
+## Processing CPC records
 
-## Step 2-b: Add extra fields
+Two modes are supported:
 
-`step2b(FILE_STEP1, FILE_STEP2a, FILE_STEP2b)`
+- Pass an explicit list of CPC record IDs to process.
+- Request the first n records, to process in batches.
 
-## Step 3: Add rank fields
+## Reports and data
 
-`step3(FILE_STEP2b, FILE_STEP3, FILE_LABELLING)`
+- Full report (PDF)
 
-From this point forward, the [labelling.csv](data/labelling.csv) file is available for the manual labeling process.
+- Full report (Word)
 
-# Evaluation of Models
+- CPC database (zip, decompress before use)
 
-`from src.evaluation import *`
+- CPC database, CSV
 
-## Loading of data
+## Evaluation 
 
-`df = pd.read_csv(FILE_LABELLING, sep=';', encoding='utf-8')`
+```
+from src.evaluation import *
+```
 
-`X = df[COLS].to_numpy(dtype=float)`
+## Context
 
-`y_true = (df["gold"] == "Yes").astype(int).to_numpy()`
+Developed at the Universidad de Valladolid, across 37 commits covering the labelling process, the linking pipeline and the evaluation suite.
 
-## Heuristics model
-
-`show_metrics(y_true, heuristics(X, y_true, UMBRAL))`
-
-## Logistic regression model
-
-`model = regression(X, y_true)`
-
-`show_metrics(y_true, model.predict(X))`
-
-## Random forest model
-
-`model = forest(X, y_true)`
-
-`show_metrics(y_true, model.predict(X))`
-
-## XG-Boost model
-
-`model = xgboost(X, y_true)`
-
-`show_metrics(y_true, model.predict(X))`
-    Father    Stanislao                              0
-    Affil     comunista                              0
-    Alias
-    Linked       LINKED
+Author: Javier Vaca Sánchez
