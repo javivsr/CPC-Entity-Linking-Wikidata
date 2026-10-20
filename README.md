@@ -122,13 +122,13 @@ Two modes are supported:
 
 ## Reports and data
 
-- Full report (PDF)
+- Full report ([PDF](https://github.com/javivsr/EntityLinkingJavierVaca/blob/main/Entity_Linking_Report.pdf))
 
-- Full report (Word)
+- Full report ([Word](https://github.com/javivsr/EntityLinkingJavierVaca/blob/main/Entity_Linking_Report.docx))
 
-- CPC database (zip, decompress before use)
+- CPC database ([zip](https://github.com/javivsr/EntityLinkingJavierVaca/blob/main/data/cpc_records.zip), decompress before use)
 
-- CPC database, CSV
+- CPC database, [CSV](https://github.com/javivsr/EntityLinkingJavierVaca/blob/main/data/cpc_csv.zip)
 
 ## Evaluation 
 
